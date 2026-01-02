@@ -1,0 +1,85 @@
+name: Process Ban List Addition
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  add-to-banlist:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.title, '[BANLIST]')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Extract username from issue
+        id: extract
+        run: |
+          # Extract username from issue body
+          USERNAME=$(echo "${{ github.event.issue.body }}" | grep -oP '(?<=Username: ).*' | tr '[:upper:]' '[:lower:]' | xargs)
+          echo "username=$USERNAME" >> $GITHUB_OUTPUT
+          
+      - name: Check if username already exists
+        id: check
+        run: |
+          if grep -qi "^${USERNAME}$" banlist.txt; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          USERNAME: ${{ steps.extract.outputs.username }}
+          
+      - name: Add username to banlist
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "${{ steps.extract.outputs.username }}" >> banlist.txt
+          sort -u banlist.txt -o banlist.txt
+          
+      - name: Commit changes
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add banlist.txt
+          git commit -m "Add ${{ steps.extract.outputs.username }} to ban list"
+          git push
+          
+      - name: Close issue with success message
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **${{ steps.extract.outputs.username }}** has been added to the community ban list!'
+            })
+            github.rest.issues.update({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              labels: ['processed']
+            })
+            
+      - name: Close issue with duplicate message
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: 'ℹ️ **${{ steps.extract.outputs.username }}** is already on the ban list.'
+            })
+            github.rest.issues.update({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'closed',
+              labels: ['duplicate']
+            })
